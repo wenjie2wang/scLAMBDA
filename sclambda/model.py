@@ -20,7 +20,7 @@ from sclambda.utils import *
 
 
 class Model_context(object):
-    def __init__(self, 
+    def __init__(self,
                  adata, # anndata object already splitted
                  gene_emb, # dictionary for gene embeddings
                  cont_emb, # dictionary for context embeddings
@@ -80,7 +80,7 @@ class Model_context(object):
         for i in tqdm(self.pert_unique):
             genes = i.split('+')
             if len(genes) > 1:
-                pert_emb_p = self.gene_emb[genes[0]] + self.gene_emb[genes[1]]
+                pert_emb_p = sum(self.gene_emb[g] for g in genes)
             else:
                 pert_emb_p = self.gene_emb[genes[0]]
             self.pert_emb_mtx.append(pert_emb_p)
@@ -115,7 +115,7 @@ class Model_context(object):
         self.gene_weight = torch.from_numpy(self.gene_weight).to(self.device).view(1, -1)
         self.pert_val = np.unique(self.adata_val.obs['cell_type+condition'].values)
 
-        self.train_data = PertDataset_context(self.adata_train.X, 
+        self.train_data = PertDataset_context(self.adata_train.X,
                                               self.pert_emb_mtx, self.pert_emb_cells_idx[self.adata.obs[split_name].values == 'train'],
                                               self.cont_emb_mtx, self.cont_emb_cells_idx[self.adata.obs[split_name].values == 'train'])
         self.train_dataloader = DataLoader(self.train_data, batch_size=self.batch_size)
@@ -141,7 +141,7 @@ class Model_context(object):
         return - MI_latent
 
     def train(self, retrain=False, grad_clip=True):
-        self.Net = Net_context(x_dim = self.x_dim, p_dim = self.p_dim, ct_dim = self.ct_dim, 
+        self.Net = Net_context(x_dim = self.x_dim, p_dim = self.p_dim, ct_dim = self.ct_dim,
             latent_dim = self.latent_dim, hidden_dim = self.hidden_dim)
         params = list(self.Net.Encoder_x.parameters())+list(self.Net.Encoder_p.parameters())+list(self.Net.Encoder_ct.parameters())+list(self.Net.Decoder_x.parameters())+list(self.Net.Decoder_p.parameters())+list(self.Net.Decoder_ct.parameters())
         optimizer = Adam(params, lr=0.0005)
@@ -157,8 +157,8 @@ class Model_context(object):
                 p = p.float().to(self.device)
                 ct = ct.float().to(self.device)
                 # adversarial training on p and ct
-                p.requires_grad = True 
-                ct.requires_grad = True 
+                p.requires_grad = True
+                ct.requires_grad = True
                 self.Net.eval()
                 with torch.enable_grad():
                     x_hat, _, _, _, _, _, _ = self.Net(x, p, ct)
@@ -182,14 +182,14 @@ class Model_context(object):
                     loss = self.loss_MINE(mean_z, s+c, s_marginal+c_marginal, T=self.Net.MINE)
                     loss.backward(retain_graph=True)
                     if grad_clip:
-                        torch.nn.utils.clip_grad_norm_(self.Net.MINE.parameters(), max_norm=100.0) 
+                        torch.nn.utils.clip_grad_norm_(self.Net.MINE.parameters(), max_norm=100.0)
                     optimizer_MINE.step()
 
                 optimizer.zero_grad()
                 loss = self.loss_function(x, x_hat, p, p_hat, ct, ct_hat, mean_z, log_var_z, s, s_marginal, c, c_marginal, T=self.Net.MINE)
                 loss.backward()
                 if grad_clip:
-                    torch.nn.utils.clip_grad_norm_(params, max_norm=100.0) 
+                    torch.nn.utils.clip_grad_norm_(params, max_norm=100.0)
                 optimizer.step()
 
             scheduler.step()
@@ -207,13 +207,13 @@ class Model_context(object):
                         cont_prev = cont
                         pert_emb_p = self.gene_emb[pert]
                         cont_emb_ct = self.cont_emb[cont]
-                        val_p = torch.from_numpy(np.tile(pert_emb_p, 
+                        val_p = torch.from_numpy(np.tile(pert_emb_p,
                                                          (val_size, 1))).float().to(self.device)
-                        val_ct = torch.from_numpy(np.tile(cont_emb_ct, 
+                        val_ct = torch.from_numpy(np.tile(cont_emb_ct,
                                                           (val_size, 1))).float().to(self.device)
                         x_hat, p_hat, ct_hat, mean_z, log_var_z, s, c = self.Net(ctrl_x[np.random.choice(np.arange(ctrl_x.shape[0]), val_size, replace=False)], val_p, val_ct)
                         x_hat = np.mean(x_hat.detach().cpu().numpy(), axis=0)
-                        corr = np.corrcoef(x_hat[self.gene_weight.detach().cpu().numpy().reshape(-1)>0], 
+                        corr = np.corrcoef(x_hat[self.gene_weight.detach().cpu().numpy().reshape(-1)>0],
                                            self.pert_delta[label][self.gene_weight.detach().cpu().numpy().reshape(-1)>0])[0, 1]
                         corr_ls.append(corr)
                         # print(label, corr)
@@ -235,11 +235,11 @@ class Model_context(object):
         torch.save(state, os.path.join(self.model_path, "ckpt.pth"))
 
     def load_pretrain(self):
-        self.Net = Net_context(x_dim = self.x_dim, p_dim = self.p_dim, ct_dim = self.ct_dim, 
+        self.Net = Net_context(x_dim = self.x_dim, p_dim = self.p_dim, ct_dim = self.ct_dim,
                            latent_dim = self.latent_dim, hidden_dim = self.hidden_dim)
         self.Net.load_state_dict(torch.load(os.path.join(self.model_path, "ckpt.pth"))['Net'])
 
-    def predict(self, 
+    def predict(self,
                 cell_type_test, # cell type or a list of cell types
                 pert_test, # perturbation or a list of perturbations
                 ctrl_exp = None, # control cell gene expression matrix or a list or matrices in np.array for in silico perturbation; use self.ctrl_x if None
@@ -249,14 +249,14 @@ class Model_context(object):
             if isinstance(ctrl_exp,  np.ndarray):
                 ctrl_exp = [ctrl_exp]
         self.Net.eval()
-        res = {} 
+        res = {}
         if isinstance(pert_test, str):
             pert_test = [pert_test]
         if isinstance(cell_type_test, str):
             cell_type_test = [cell_type_test]
         for n, ct in enumerate(cell_type_test):
             pert_emb_ct = self.cont_emb[ct]
-            val_ct = torch.from_numpy(np.tile(pert_emb_ct, 
+            val_ct = torch.from_numpy(np.tile(pert_emb_ct,
                                       (n_cells, 1))).float().to(self.device)
             if ctrl_exp is not None:
                 ctrl_exp_ct = ctrl_exp[n]
@@ -266,10 +266,10 @@ class Model_context(object):
             for i in pert_test:
                 if self.multi_gene:
                     genes = i.split('+')
-                    pert_emb_p = self.gene_emb[genes[0]] + self.gene_emb[genes[1]]
+                    pert_emb_p = sum(self.gene_emb[g] for g in genes)
                 else:
                     pert_emb_p = self.gene_emb[i]
-                val_p = torch.from_numpy(np.tile(pert_emb_p, 
+                val_p = torch.from_numpy(np.tile(pert_emb_p,
                                          (ctrl_exp_ct.shape[0], 1))).float().to(self.device)
                 x_hat, p_hat, ct_hat, mean_z, log_var_z, s, c = self.Net(ctrl_exp_ct, val_p, val_ct)
                 if return_type == 'cells':
@@ -283,30 +283,30 @@ class Model_context(object):
                     raise ValueError("return_type can only be 'mean' or 'cells'.")
         return res
 
-    def generate(self, 
+    def generate(self,
                  cell_type_test, # cell type or a list of cell types
                  pert_test, # perturbation or a list of perturbations
                  n_cells = 10000, # number of cells to generate
                  return_type = 'mean', # return mean or cells
                  ):
         self.Net.eval()
-        res = {} 
+        res = {}
         if isinstance(pert_test, str):
             pert_test = [pert_test]
         if isinstance(cell_type_test, str):
             cell_type_test = [cell_type_test]
         for ct in cell_type_test:
             pert_emb_ct = self.cont_emb[ct]
-            val_ct = torch.from_numpy(np.tile(pert_emb_ct, 
+            val_ct = torch.from_numpy(np.tile(pert_emb_ct,
                                       (n_cells, 1))).float().to(self.device)
             c = self.Net.Encoder_ct(val_ct)
             for i in pert_test:
                 if self.multi_gene:
                     genes = i.split('+')
-                    pert_emb_p = self.gene_emb[genes[0]] + self.gene_emb[genes[1]]
+                    pert_emb_p = sum(self.gene_emb[g] for g in genes)
                 else:
                     pert_emb_p = self.gene_emb[i]
-                val_p = torch.from_numpy(np.tile(pert_emb_p, 
+                val_p = torch.from_numpy(np.tile(pert_emb_p,
                                          (n_cells, 1))).float().to(self.device)
                 s = self.Net.Encoder_p(val_p)
                 z = torch.randn(n_cells, self.latent_dim).to(self.device)
@@ -321,7 +321,7 @@ class Model_context(object):
         return res
 
 class Model(object):
-    def __init__(self, 
+    def __init__(self,
                  adata, # anndata object already splitted
                  gene_emb, # dictionary for gene embeddings
                  split_name = 'split',
@@ -402,10 +402,19 @@ class Model(object):
                 self.tg_loc[i] = tg_loc_i
             self.adata.obsm['tg_loc'] = np.int64(self.tg_loc_cells)
 
-        # control cells
-        ctrl_x = adata[adata.obs['condition'].values == 'ctrl'].X
-        self.ctrl_mean = np.mean(ctrl_x, axis=0)
+        # control cells — use only training controls to avoid leaking
+        # validation data into the centering
+        train_mask = self.adata.obs[split_name].values == 'train'
+        ctrl_mask = self.adata.obs['condition'].values == 'ctrl'
+        ctrl_x = adata[ctrl_mask].X
+        train_ctrl_x = adata[train_mask & ctrl_mask].X
+        self.ctrl_mean = np.asarray(np.mean(train_ctrl_x, axis=0)).ravel()
         self.ctrl_x = torch.from_numpy(ctrl_x - self.ctrl_mean.reshape(1, -1)).float().to(self.device)
+        # Keep a training-only copy for validation; ctrl_x (all controls) is
+        # used by predict() so we don't restrict it here.
+        self.ctrl_x_train = torch.from_numpy(
+            train_ctrl_x - self.ctrl_mean.reshape(1, -1)
+        ).float().to(self.device)
         self.adata.X = self.adata.X - self.ctrl_mean.reshape(1, -1)
         if self.ctrl_size is not None:
             # subsample a group of control cells for validation if there are too many ctrl cells
@@ -417,22 +426,24 @@ class Model(object):
         print("Spliting data...")
         self.adata_train = self.adata[self.adata.obs[split_name].values == 'train']
         self.adata_val = self.adata[self.adata.obs[split_name].values == 'val']
-        self.pert_val = np.unique(self.adata_val.obs['condition'].values)
+        self.pert_val = np.array([p for p in np.unique(self.adata_val.obs['condition'].values) if p != 'ctrl'])
 
         if self.use_tg_coord:
             self.ctrl_mean_tensor = torch.from_numpy(self.ctrl_mean).view(-1).float().to(self.device)
-            self.train_data = PertDataset(torch.from_numpy(self.adata_train.X).float().to(self.device), 
+            self.train_data = PertDataset(torch.from_numpy(self.adata_train.X).float().to(self.device),
                                           torch.from_numpy(self.adata_train.obsm['pert_emb']).float().to(self.device),
                                           torch.from_numpy(self.adata_train.obsm['tg_loc']).long().to(self.device),
                                           {i: torch.from_numpy(self.pert_emb_cells_tg[i]).float().to(self.device) for i in list(self.pert_emb_cells_tg.keys())})
         else:
-            self.train_data = PertDataset(torch.from_numpy(self.adata_train.X).float().to(self.device), 
+            self.train_data = PertDataset(torch.from_numpy(self.adata_train.X).float().to(self.device),
                                           torch.from_numpy(self.adata_train.obsm['pert_emb']).float().to(self.device))
         self.train_dataloader = DataLoader(self.train_data, batch_size=self.batch_size, shuffle=True)
 
+        # Compute ground-truth mean expression per condition from validation
+        # data only, so the validation metric does not leak training data
         self.pert_delta = {}
-        for i in np.unique(self.adata.obs['condition'].values):
-            adata_i = self.adata[self.adata.obs['condition'].values == i]
+        for i in np.unique(self.adata_val.obs['condition'].values):
+            adata_i = self.adata_val[self.adata_val.obs['condition'].values == i]
             delta_i = np.mean(adata_i.X, axis=0)
             self.pert_delta[i] = delta_i
 
@@ -452,7 +463,7 @@ class Model(object):
 
     def train(self, retrain=False):
         if not retrain:
-            self.Net = Net(x_dim = self.x_dim, p_dim = self.p_dim, 
+            self.Net = Net(x_dim = self.x_dim, p_dim = self.p_dim,
                            latent_dim = self.latent_dim, hidden_dim = self.hidden_dim,
                            use_tg_coord = self.use_tg_coord)
         params = list(self.Net.Encoder_x.parameters())+list(self.Net.Encoder_p.parameters())+list(self.Net.Decoder_x.parameters())+list(self.Net.Decoder_p.parameters())
@@ -461,7 +472,8 @@ class Model(object):
         optimizer_MINE = Adam(self.Net.MINE.parameters(), lr=0.0005, weight_decay=0.0001)
         scheduler_MINE = StepLR(optimizer_MINE, step_size=30, gamma=0.2)
 
-        corr_val_best = 0
+        corr_val_best = -np.inf
+        self.model_best = copy.deepcopy(self.Net)
         if retrain:
             if len(self.pert_val) > 0: # If validating
                 self.Net.eval()
@@ -469,26 +481,26 @@ class Model(object):
                 for i in self.pert_val:
                     if self.multi_gene:
                         genes = i.split('+')
-                        pert_emb_p = self.gene_emb[genes[0]] + self.gene_emb[genes[1]]
+                        pert_emb_p = self.pert_emb[i]
                         if self.use_tg_coord:
                             p_tg_ls = [self.gene_emb[gene] for gene in genes]
                     else:
                         pert_emb_p = self.gene_emb[i]
                         if self.use_tg_coord:
                             p_tg_ls = [self.gene_emb[i]]
-                    val_p = torch.from_numpy(np.tile(pert_emb_p, 
-                                                     (self.ctrl_x.shape[0], 1))).float().to(self.device)
+                    val_p = torch.from_numpy(np.tile(pert_emb_p,
+                                                     (self.ctrl_x_train.shape[0], 1))).float().to(self.device)
                     genes = i.split('+')
                     tg_loc_i = gene2loc(genes, self.adata.var.gene_name.values, self.n_tgs)
-                    tg_loc = torch.from_numpy(np.tile(np.array(tg_loc_i), 
-                                                     (self.ctrl_x.shape[0], 1))).long().to(self.device)
+                    tg_loc = torch.from_numpy(np.tile(np.array(tg_loc_i),
+                                                     (self.ctrl_x_train.shape[0], 1))).long().to(self.device)
                     if self.use_tg_coord:
-                        p_tg = [torch.from_numpy(np.tile(p_tg_i, 
-                                                     (self.ctrl_x.shape[0], 1))).float().to(self.device) for p_tg_i in p_tg_ls]
-                        x_hat, x_hat_tg_ls, p_hat, mean_z, log_var_z, s = self.Net(self.ctrl_x, val_p, tg_loc.long(), p_tg)
+                        p_tg = [torch.from_numpy(np.tile(p_tg_i,
+                                                     (self.ctrl_x_train.shape[0], 1))).float().to(self.device) for p_tg_i in p_tg_ls]
+                        x_hat, x_hat_tg_ls, p_hat, mean_z, log_var_z, s = self.Net(self.ctrl_x_train, val_p, tg_loc.long(), p_tg)
                         x_hat = adjust_tg(x_hat, x_hat_tg_ls, tg_loc, self.ctrl_mean_tensor)
                     else:
-                        x_hat, p_hat, mean_z, log_var_z, s = self.Net(self.ctrl_x, val_p)
+                        x_hat, p_hat, mean_z, log_var_z, s = self.Net(self.ctrl_x_train, val_p)
                     x_hat = np.mean(x_hat.detach().cpu().numpy(), axis=0)
                     corr = np.corrcoef(x_hat, self.pert_delta[i])[0, 1]
                     corr_ls.append(corr)
@@ -500,7 +512,7 @@ class Model(object):
             if self.use_tg_coord:
                 for x, p, tg_loc, p_tg in self.train_dataloader:
                     # adversarial training on p
-                    p.requires_grad = True 
+                    p.requires_grad = True
                     self.Net.eval()
                     with torch.enable_grad():
                         x_hat, x_hat_tg_ls, _, _, _, _ = self.Net(x, p, tg_loc, p_tg)
@@ -534,7 +546,7 @@ class Model(object):
             else:
                 for x, p in self.train_dataloader:
                     # adversarial training on p
-                    p.requires_grad = True 
+                    p.requires_grad = True
                     self.Net.eval()
                     with torch.enable_grad():
                         x_hat, _, _, _, _ = self.Net(x, p)
@@ -569,26 +581,26 @@ class Model(object):
                     for i in self.pert_val:
                         if self.multi_gene:
                             genes = i.split('+')
-                            pert_emb_p = self.gene_emb[genes[0]] + self.gene_emb[genes[1]]
+                            pert_emb_p = self.pert_emb[i]
                             if self.use_tg_coord:
                                 p_tg_ls = [self.gene_emb[gene] for gene in genes]
                         else:
                             pert_emb_p = self.gene_emb[i]
                             if self.use_tg_coord:
                                 p_tg_ls = [self.gene_emb[i]]
-                        val_p = torch.from_numpy(np.tile(pert_emb_p, 
-                                                         (self.ctrl_x.shape[0], 1))).float().to(self.device)
+                        val_p = torch.from_numpy(np.tile(pert_emb_p,
+                                                         (self.ctrl_x_train.shape[0], 1))).float().to(self.device)
                         if self.use_tg_coord:
                             genes = i.split('+')
                             tg_loc_i = gene2loc(genes, self.adata.var.gene_name.values, self.n_tgs)
-                            tg_loc = torch.from_numpy(np.tile(np.array(tg_loc_i), 
-                                                             (self.ctrl_x.shape[0], 1))).long().to(self.device)
-                            p_tg = [torch.from_numpy(np.tile(p_tg_i, 
-                                                         (self.ctrl_x.shape[0], 1))).float().to(self.device) for p_tg_i in p_tg_ls]
-                            x_hat, x_hat_tg_ls, p_hat, mean_z, log_var_z, s = self.Net(self.ctrl_x, val_p, tg_loc.long(), p_tg)
+                            tg_loc = torch.from_numpy(np.tile(np.array(tg_loc_i),
+                                                             (self.ctrl_x_train.shape[0], 1))).long().to(self.device)
+                            p_tg = [torch.from_numpy(np.tile(p_tg_i,
+                                                         (self.ctrl_x_train.shape[0], 1))).float().to(self.device) for p_tg_i in p_tg_ls]
+                            x_hat, x_hat_tg_ls, p_hat, mean_z, log_var_z, s = self.Net(self.ctrl_x_train, val_p, tg_loc.long(), p_tg)
                             x_hat = adjust_tg(x_hat, x_hat_tg_ls, tg_loc, self.ctrl_mean_tensor)
                         else:
-                            x_hat, p_hat, mean_z, log_var_z, s = self.Net(self.ctrl_x, val_p)
+                            x_hat, p_hat, mean_z, log_var_z, s = self.Net(self.ctrl_x_train, val_p)
                         x_hat = np.mean(x_hat.detach().cpu().numpy(), axis=0)
                         corr = np.corrcoef(x_hat, self.pert_delta[i])[0, 1]
                         corr_ls.append(corr)
@@ -610,12 +622,12 @@ class Model(object):
         torch.save(state, os.path.join(self.model_path, "ckpt.pth"))
 
     def load_pretrain(self):
-        self.Net = Net(x_dim = self.x_dim, p_dim = self.p_dim, 
+        self.Net = Net(x_dim = self.x_dim, p_dim = self.p_dim,
                        latent_dim = self.latent_dim, hidden_dim = self.hidden_dim,
                        use_tg_coord = self.use_tg_coord)
         self.Net.load_state_dict(torch.load(os.path.join(self.model_path, "ckpt.pth"))['Net'])
 
-    def predict(self, 
+    def predict(self,
                 pert_test, # perturbation or a list of perturbations
                 ctrl_exp = None, # control cell gene expression matrix in np.array for in silico perturbation; use self.ctrl_x if None
                 return_type = 'mean', # return mean or cells
@@ -625,27 +637,27 @@ class Model(object):
         else:
             ctrl_exp = self.ctrl_x
         self.Net.eval()
-        res = {} 
+        res = {}
         if isinstance(pert_test, str):
             pert_test = [pert_test]
         for i in pert_test:
             if self.multi_gene:
                 genes = i.split('+')
-                pert_emb_p = self.gene_emb[genes[0]] + self.gene_emb[genes[1]]
+                pert_emb_p = sum(self.gene_emb[g] for g in genes)
                 if self.use_tg_coord:
                     p_tg_ls = [self.gene_emb[gene] for gene in genes]
             else:
                 pert_emb_p = self.gene_emb[i]
                 if self.use_tg_coord:
                     p_tg_ls = [self.gene_emb[i]]
-            val_p = torch.from_numpy(np.tile(pert_emb_p, 
+            val_p = torch.from_numpy(np.tile(pert_emb_p,
                                      (ctrl_exp.shape[0], 1))).float().to(self.device)
             if self.use_tg_coord:
                 genes = i.split('+')
                 tg_loc_i = gene2loc(genes, self.adata.var.gene_name.values, self.n_tgs)
-                tg_loc = torch.from_numpy(np.tile(np.array(tg_loc_i), 
+                tg_loc = torch.from_numpy(np.tile(np.array(tg_loc_i),
                                                  (ctrl_exp.shape[0], 1))).long().to(self.device)
-                p_tg = [torch.from_numpy(np.tile(p_tg_i, 
+                p_tg = [torch.from_numpy(np.tile(p_tg_i,
                                              (ctrl_exp.shape[0], 1))).float().to(self.device) for p_tg_i in p_tg_ls]
                 x_hat, x_hat_tg_ls, p_hat, mean_z, log_var_z, s = self.Net(ctrl_exp, val_p, tg_loc, p_tg)
             else:
@@ -661,35 +673,35 @@ class Model(object):
                 raise ValueError("return_type can only be 'mean' or 'cells'.")
         return res
 
-    def generate(self, 
+    def generate(self,
                  pert_test, # perturbation or a list of perturbations
                  n_cells = 10000, # number of cells to generate
                  return_type = 'mean', # return mean or cells
                  ):
         self.Net.eval()
-        res = {} 
+        res = {}
         if isinstance(pert_test, str):
             pert_test = [pert_test]
         for i in pert_test:
             if self.multi_gene:
                 genes = i.split('+')
-                pert_emb_p = self.gene_emb[genes[0]] + self.gene_emb[genes[1]]
+                pert_emb_p = sum(self.gene_emb[g] for g in genes)
                 if self.use_tg_coord:
                     p_tg_ls = [self.gene_emb[gene] for gene in genes]
             else:
                 pert_emb_p = self.gene_emb[i]
                 if self.use_tg_coord:
                     p_tg_ls = [self.gene_emb[i]]
-            val_p = torch.from_numpy(np.tile(pert_emb_p, 
+            val_p = torch.from_numpy(np.tile(pert_emb_p,
                                              (n_cells, 1))).float().to(self.device)
             s = self.Net.Encoder_p(val_p)
             z = torch.randn(n_cells, self.latent_dim).to(self.device)
             if self.use_tg_coord:
                 genes = i.split('+')
                 tg_loc_i = gene2loc(genes, self.adata.var.gene_name.values, self.n_tgs)
-                tg_loc = torch.from_numpy(np.tile(np.array(tg_loc_i), 
+                tg_loc = torch.from_numpy(np.tile(np.array(tg_loc_i),
                                                  (n_cells, 1))).long().to(self.device)
-                p_tg = [torch.from_numpy(np.tile(p_tg_i, 
+                p_tg = [torch.from_numpy(np.tile(p_tg_i,
                                              (n_cells, 1))).float().to(self.device) for p_tg_i in p_tg_ls]
                 x_hat_tg_ls = []
                 for j in range(tg_loc.shape[1]):
@@ -721,9 +733,9 @@ class Model(object):
             tg_loc = torch.from_numpy(self.adata.obsm['tg_loc']).long().to(self.device)
             p_tg = [torch.from_numpy(self.pert_emb_cells_tg[i]).float().to(self.device) for i in list(self.pert_emb_cells_tg.keys())]
             for i in range(x.shape[0] // 1000 + 1): # use minibatch as this is more memory consuming
-                _, _, _, mean_z_batch, _, s_batch = self.Net(x[i*1000:(i+1)*1000], 
-                                                             p[i*1000:(i+1)*1000], 
-                                                             tg_loc[i*1000:(i+1)*1000], 
+                _, _, _, mean_z_batch, _, s_batch = self.Net(x[i*1000:(i+1)*1000],
+                                                             p[i*1000:(i+1)*1000],
+                                                             tg_loc[i*1000:(i+1)*1000],
                                                              [it[i*1000:(i+1)*1000] for it in p_tg])
                 if i == 0:
                     mean_z = mean_z_batch.clone()
@@ -786,4 +798,3 @@ class PertDataset(Dataset):
             return self.x[idx].to(self.device), self.p[idx].to(self.device)
         else:
             return self.x[idx].to(self.device), self.p[idx].to(self.device), self.tg_loc[idx].to(self.device), [self.pert_emb_cells_tg[i][idx].to(self.device) for i in list(self.pert_emb_cells_tg.keys())]
-
